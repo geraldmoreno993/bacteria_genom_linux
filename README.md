@@ -1,0 +1,1 @@
+# bacteria_genom_linux
