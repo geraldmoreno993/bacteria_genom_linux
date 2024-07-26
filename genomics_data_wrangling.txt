@@ -1,0 +1,196 @@
+#!/bin/bash                                                                     
+#:Title: "Genomic data wrangling"                                                      
+#:Date: 05-07-2024                                                             
+#:Author: "Gerald Moreno" <gmoreno993@gmail.com>                               
+#:Version: 1.0                                                                 
+#:Description : Procesamiento genomico bacteriano para deteccion de variantes                                
+#:Reference: https://datacarpentry.org/wrangling-genomics/index.html                                                               
+
+## Acceso a la estacion de trabajo
+ssh guillermo.romero@38.43.142.232
+speed123
+
+ls
+ls -lh *.fastq
+
+#Flujograma
+#1. Quality control - Assessing quality using FastQC
+#2. Quality control - Trimming and/or filtering reads (if necessary)
+#3. Align reads to reference genome
+#4. Perform post-alignment clean-up
+#5. Variant calling
+
+
+#######################
+###Calidad de Fastqs###
+#######################
+
+conda activate bioinfo_basic 
+
+cd /home/guillermo.romero/seminario2/dc_workshop/data
+#Echamos un vistazo a la metadata
+pip install csvkit
+csvlook *.csv
+csvstat --columns generation Ecoli_metadata_composite.csv #estadisticas de una columna especifica
+csvstat Ecoli_metadata_composite.csv 
+csvlook Ecoli_metadata_composite.csv 
+
+csvstat --columns cit Ecoli_metadata_composite.csv 
+csvstat --columns mutator Ecoli_metadata_composite.csv 
+
+##Secuencias
+cd /home/guillermo.romero/seminario2/dc_workshop/data/untrimmed_fastq
+
+#Descomprimiendo
+gunzip SRR2584863_1.fastq.gz
+head -n 4 SRR2584863_1.fastq
+tail -n 4 SRR2584863_1.fastq
+
+#fastqc
+mkdir ./fastqc_report | fastqc *.fastq* --outdir ./fastqc_html
+
+#bajando html (SALES DE LA SESION)
+scp guillermo.romero@38.43.142.232:~/seminario2/dc_workshop/data/untrimmed_fastq/fastqc_html/*.html* /home/gerald/Documentos/maestria/Bash_linux/Expo2
+
+##Preparando para cortar
+cd ~/seminario2/dc_workshop/data/untrimmed_fastq
+conda activate bioinfo_basic
+
+cd trimmed
+
+##Bajar los adaptadores ilumina para su remocion de los fastq
+wget https://raw.githubusercontent.com/timflutre/trimmomatic/master/adapters/NexteraPE-PE.fa
+
+
+#Cortar
+trimmomatic PE SRR2589044_1.fastq.gz SRR2589044_2.fastq.gz \
+                SRR2589044_1.trim.fastq.gz SRR2589044_1un.trim.fastq.gz \
+                SRR2589044_2.trim.fastq.gz SRR2589044_2un.trim.fastq.gz \
+                SLIDINGWINDOW:4:20 MINLEN:25 ILLUMINACLIP:NexteraPE-PE.fa:2:40:15
+
+
+#comprimiendo para homogeneizar archivos
+gzip -9 SRR2584863_1.fastq  ##Trata que todos los Fastq esten comprimidos
+
+
+Probar con ambos bucles para realiar el trimado automatico de todos los archivos, con el primero me fue bien
+
+#bucle generado por Gerald
+#--------------------------------------------------------------------------------------------------------
+
+# Itera sobre los archivos *_1.fastq.gz
+for f in *_1.fastq.gz; do
+    # Extrae el nombre base del archivo (sin la extensión)
+    n="${f%%_1.fastq.gz}"
+    
+    # Ejecuta el comando trimmomatic
+    trimmomatic PE -threads 4 \
+        "${n}_1.fastq.gz" "${n}_2.fastq.gz" \
+        "${n}_1.trim.fastq.gz" "${n}_1un.trim.fastq.gz" \
+        "${n}_2.trim.fastq.gz" "${n}_2un.trim.fastq.gz" \
+        SLIDINGWINDOW:4:20 MINLEN:25 ILLUMINACLIP:NexteraPE-PE.fa:2:40:15
+
+done
+
+##Este es el bucle que figura en el carpentry
+$ for infile in *_1.fastq.gz
+do
+  base=$(basename ${infile} _1.fastq.gz)
+   trimmomatic PE ${infile} ${base}_2.fastq.gz \
+               ${base}_1.trim.fastq.gz ${base}_1un.trim.fastq.gz \
+               ${base}_2.trim.fastq.gz ${base}_2un.trim.fastq.gz \
+               SLIDINGWINDOW:4:20 MINLEN:25 ILLUMINACLIP:NexteraPE-PE.fa:2:40:15 
+done
+
+#Ahora prosigue moviendo todos los trimmed a la carpeta trimmed--------------------------------------------------------------
+
+
+fastqc /home/guillermo.romero/seminario2/dc_workshop/data/untrimmed_fastq/trimmed/*.fastq*
+
+#bajando html trimados (SALES DE LA SESION)
+scp guillermo.romero@38.43.142.232:~/seminario2/dc_workshop/data/untrimmed_fastq/trimmed/trimmedfastq_html/*.html /home/gerald/Documentos/maestria/Bash_linux/Expo2
+
+##subir archivos (esto solo es para conocimiento)
+scp /home/gerald/Documentos/maestria/Bash_linux/Expo2/expo.sh guillermo.romero@38.43.142.232:~/seminario2
+
+#######################################################
+###Creando archivo .sam y luego convirtiendo en .bam###
+#######################################################
+
+
+conda activate bioinfo_basic 
+
+cd /home/guillermo.romero/seminario2/dc_workshop/data
+
+#indexando genoma de referencia
+bwa index ecoli_rel606.fasta
+
+#Creando archivo sam (alineando reads trimados al genoma de referencia)
+bwa mem ecoli_rel606.fasta SRR2584863_1.trim.sub.fastq SRR2584863_2.trim.sub.fastq > SRR2584866.aligned.sam
+
+#Convirtiendo de sam a bam
+#We will convert the SAM file to BAM format using the samtools program with the view command and tell 
+#this command that the input is in SAM format (-S) and to output BAM format (-b):
+
+samtools view -S -b SRR2584866.aligned.sam > SRR2584866.aligned.bam
+ls
+
+#sort bam
+samtools sort -o SRR2584866.aligned.sorted.bam SRR2584866.aligned.bam
+
+#####################
+###Variant calling###
+#####################
+
+## Acceso a la estacion de trabajo
+ssh guillermo.romero@38.43.142.232
+speed123
+
+#ubicarse
+conda activate bioinfo_env
+#path
+cd ~/seminario2/dc_workshop/data/ref_genome/no_entrar
+mkdir demostracion
+cp ecoli_rel606.fasta SRR2584866.aligned.sorted.bam ./demostracion
+cd demostracion   
+
+#step_1
+#instalacion
+conda create -n bioinfo_env
+conda activate bioinfo_env
+conda install -c bioconda bcftools
+conda install -c conda-forge openssl=1.0
+conda update --all   
+bcftools --version
+
+#Entrando a otro ambiente
+conda activate bioinfo_env
+bcftools --version
+#Step 1: Calculando el read coverage
+bcftools mpileup -O b -o SRR2584866_raw.bcf -f ecoli_rel606.fasta SRR2584866.aligned.sorted.bam 
+#We have now generated a file with coverage information for every base.
+head SRR2584866_raw.bcf
+
+#Step 2: Detect the single nucleotide variants (SNVs)
+bcftools call --ploidy 1 -m -v -o SRR2584866_variants.vcf SRR2584866_raw.bcf 
+
+#Step 3: Filter and report the SNV variants in variant calling format (VCF)
+vcfutils.pl varFilter SRR2584866_variants.vcf  > SRR2584866_final_variants.vcf
+
+#Entrar al output: SRR2584866_final_variants.vcf
+less -S SRR2584866_final_variants.vcf
+
+#Numero de variantes encontradas
+grep -v "#" SRR2584866_final_variants.vcf | wc -l
+
+SRR2584866_final_variants.vcf
+#Step4: Viewing with tview 
+conda activate bioinfo_basic
+samtools index SRR2584866.aligned.sorted.bam
+samtools tview SRR2584866.aligned.sorted.bam ecoli_rel606.fasta
+
+
+
+
+
+
