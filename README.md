@@ -1,1 +1,1 @@
-# bacteria_genom_linux
+# bacteria_variant_calling_linux
