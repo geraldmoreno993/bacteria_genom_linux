@@ -7,8 +7,6 @@
 #:Reference: https://datacarpentry.org/wrangling-genomics/index.html                                                               
 
 ## Acceso a la estacion de trabajo
-ssh guillermo.romero@38.43.142.232
-speed123
 
 ls
 ls -lh *.fastq
